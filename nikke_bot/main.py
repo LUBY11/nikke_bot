@@ -59,17 +59,28 @@ _last_sent_id = None
 @bot.event
 async def on_ready():
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] ✅ 로그인 완료: {bot.user}")
+
+    # 🔹 첫 실행 시 트윗 즉시 확인 (비동기 태스크로 실행)
+    bot.loop.create_task(first_run_check())
+
+    # 🔹 주기 루프 시작
     check_tweets.start()
 
 
 # -------------------------------------
-# 트윗 자동 확인 루프
+# 첫 실행용 트윗 확인 (봇 로그인 직후)
 # -------------------------------------
-@tasks.loop(seconds=CHECK_INTERVAL)
-async def check_tweets():
-    global _last_sent_id
+async def first_run_check():
+    await asyncio.sleep(2)  # 봇 완전히 준비될 때까지 잠깐 대기
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 🚀 첫 실행 - 최신 트윗 즉시 확인 중...")
+    await run_tweet_check()
 
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 🔄 새 트윗 확인 중...")
+
+# -------------------------------------
+# 트윗 확인 함수 (재사용)
+# -------------------------------------
+async def run_tweet_check():
+    global _last_sent_id
 
     try:
         has_new, tweet = await has_new_tweet(USERNAME)
@@ -91,6 +102,35 @@ async def check_tweets():
     else:
         print("❌ 새 트윗 없음.")
 
+
+# -------------------------------------
+# 트윗 자동 확인 루프 (1시간마다 확인 + 5분 간격 콘솔 알림)
+# -------------------------------------
+@tasks.loop(seconds=60)  # 1분마다 반복
+async def check_tweets():
+    INTERVAL = CHECK_INTERVAL  # 예: 3600초 (1시간)
+    elapsed = getattr(check_tweets, "_elapsed", 0)
+    remaining = INTERVAL - elapsed
+
+    # 첫 실행 시 초기화
+    if not hasattr(check_tweets, "_elapsed"):
+        check_tweets._elapsed = 0
+        print(f"[{datetime.now():%H:%M:%S}] ⏱ 새 트윗 확인까지 {remaining // 60}분 남았습니다.")
+        return
+
+    # 5분마다 남은 시간 출력
+    if remaining > 0 and remaining % 300 == 0:
+        print(f"[{datetime.now():%H:%M:%S}] ⏱ 새 트윗 확인까지 {remaining // 60}분 남았습니다.")
+
+    # 1시간이 경과하면 트윗 확인
+    if elapsed >= INTERVAL:
+        print(f"[{datetime.now():%H:%M:%S}] 🔄 새 트윗 확인 중...")
+        await run_tweet_check()
+        check_tweets._elapsed = 0
+        return
+
+    # 시간 누적
+    check_tweets._elapsed = elapsed + 60
 
 # -------------------------------------
 # 트윗 임베드 전송
