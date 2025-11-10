@@ -3,7 +3,7 @@ import asyncio
 import discord
 from discord.ext import tasks, commands
 from config import TOKEN, CHANNEL_ID, CHECK_INTERVAL, IMPORTANT_KEYWORDS
-from twitter_api_helper import has_new_tweet, RateLimitError, get_latest_tweet
+from twitter_api_helper import has_new_tweet, RateLimitError
 from rss_fallback import get_latest_rss_tweet
 from utils import ensure_env_exists
 
@@ -66,5 +66,15 @@ async def check_tweets():
     )
     embed.set_footer(text=f"출처: @{tweet['url'].split('/')[3]}")
 
+    # ✅ 이미지가 있을 경우 embed에 추가
     if tweet["media"]:
-        embed.set_image(url=tweet["media"]_
+        embed.set_image(url=tweet["media"][0])
+
+    await channel.send(embed=embed)
+    print(f"✅ 새 트윗 전송 완료: {tweet['url']}")
+
+# ---------------------------------
+# 실행부
+# ---------------------------------
+if __name__ == "__main__":
+    bot.run(TOKEN)
