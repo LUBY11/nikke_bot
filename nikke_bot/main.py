@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 
-from twitter_api_helper import get_latest_tweet, has_new_tweet, RateLimitError
+from twitter_api_helper import has_new_tweet, RateLimitError, get_latest_tweet
 from rss_fallback import get_latest_rss_tweet
 
 
@@ -22,7 +22,6 @@ def ensure_env():
             "DISCORD_CHANNEL_ID=\n"
             "TWITTER_BEARER_TOKEN=\n"
             "USERNAME=NIKKE_kr\n"
-            "CHECK_INTERVAL=3600\n"
             "IMPORTANT_KEYWORDS=점검,업데이트,이벤트,긴급\n"
             "RSS_FALLBACK_URL=https://nitter.net/NIKKE_kr/rss\n"
         )
@@ -41,12 +40,9 @@ load_dotenv()
 # -------------------------------------
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", 0))
-TWITTER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 USERNAME = os.getenv("USERNAME", "NIKKE_kr")
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 3600))
 IMPORTANT_KEYWORDS = os.getenv("IMPORTANT_KEYWORDS", "업데이트,점검").split(",")
 RSS_FALLBACK_URL = os.getenv("RSS_FALLBACK_URL")
-
 
 # -------------------------------------
 # Discord 봇 초기화
@@ -60,32 +56,50 @@ _last_sent_id = None
 async def on_ready():
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] ✅ 로그인 완료: {bot.user}")
 
-    # 🔹 첫 실행 시 트윗 즉시 확인 (비동기 태스크로 실행)
-    bot.loop.create_task(first_run_check())
+    # ✅ 첫 실행 시 즉시 트윗 확인
+    await initial_tweet_check()
 
-    # 🔹 주기 루프 시작
+    # ✅ 주기적 루프 시작 (1분마다)
     check_tweets.start()
 
 
 # -------------------------------------
-# 첫 실행용 트윗 확인 (봇 로그인 직후)
+# 최초 1회 즉시 확인용 함수
 # -------------------------------------
-async def first_run_check():
-    await asyncio.sleep(2)  # 봇 완전히 준비될 때까지 잠깐 대기
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 🚀 첫 실행 - 최신 트윗 즉시 확인 중...")
-    await run_tweet_check()
-
-
-# -------------------------------------
-# 트윗 확인 함수 (재사용)
-# -------------------------------------
-async def run_tweet_check():
+async def initial_tweet_check():
     global _last_sent_id
+    print(f"[{datetime.now():%H:%M:%S}] 🚀 첫 실행 — 최신 트윗 확인 중...")
 
     try:
         has_new, tweet = await has_new_tweet(USERNAME)
     except RateLimitError:
-        print("⚠️ Twitter API 제한 도달. RSS 피드로 우회합니다.")
+        print("⚠️ Twitter API 제한 도달 → RSS 피드로 전환")
+        tweet = await get_latest_rss_tweet()
+        has_new = tweet and tweet.get("id") != _last_sent_id
+    except Exception as e:
+        print(f"❌ 오류 발생: {e}")
+        return
+
+    if has_new and tweet:
+        await send_tweet(tweet)
+        _last_sent_id = tweet["id"]
+    else:
+        print("❌ 새 트윗 없음 — 대기 시작.")
+
+
+# -------------------------------------
+# 트윗 자동 확인 루프 (1분마다)
+# -------------------------------------
+@tasks.loop(seconds=60)
+async def check_tweets():
+    global _last_sent_id
+
+    print(f"[{datetime.now():%H:%M:%S}] 🔄 새 트윗 확인 중...")
+
+    try:
+        has_new, tweet = await has_new_tweet(USERNAME)
+    except RateLimitError:
+        print("⚠️ API 제한 — RSS 피드로 우회")
         tweet = await get_latest_rss_tweet()
         has_new = tweet and tweet.get("id") != _last_sent_id
     except Exception as e:
@@ -94,7 +108,7 @@ async def run_tweet_check():
 
     if has_new and tweet:
         if tweet["id"] == _last_sent_id:
-            print("⏩ 이미 전송된 트윗, 건너뜀.")
+            print("⏩ 이미 전송된 트윗 — 패스")
             return
 
         await send_tweet(tweet)
@@ -102,35 +116,6 @@ async def run_tweet_check():
     else:
         print("❌ 새 트윗 없음.")
 
-
-# -------------------------------------
-# 트윗 자동 확인 루프 (1시간마다 확인 + 5분 간격 콘솔 알림)
-# -------------------------------------
-@tasks.loop(seconds=60)  # 1분마다 반복
-async def check_tweets():
-    INTERVAL = CHECK_INTERVAL  # 예: 3600초 (1시간)
-    elapsed = getattr(check_tweets, "_elapsed", 0)
-    remaining = INTERVAL - elapsed
-
-    # 첫 실행 시 초기화
-    if not hasattr(check_tweets, "_elapsed"):
-        check_tweets._elapsed = 0
-        print(f"[{datetime.now():%H:%M:%S}] ⏱ 새 트윗 확인까지 {remaining // 60}분 남았습니다.")
-        return
-
-    # 5분마다 남은 시간 출력
-    if remaining > 0 and remaining % 300 == 0:
-        print(f"[{datetime.now():%H:%M:%S}] ⏱ 새 트윗 확인까지 {remaining // 60}분 남았습니다.")
-
-    # 1시간이 경과하면 트윗 확인
-    if elapsed >= INTERVAL:
-        print(f"[{datetime.now():%H:%M:%S}] 🔄 새 트윗 확인 중...")
-        await run_tweet_check()
-        check_tweets._elapsed = 0
-        return
-
-    # 시간 누적
-    check_tweets._elapsed = elapsed + 60
 
 # -------------------------------------
 # 트윗 임베드 전송
@@ -165,7 +150,7 @@ async def send_tweet(tweet):
                 await channel.send(media_url)
 
     await channel.send(embed=embed)
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] ✅ 새 트윗 전송 완료: {tweet['url']}")
+    print(f"[{datetime.now():%H:%M:%S}] ✅ 새 트윗 전송 완료: {tweet['url']}")
 
 
 # -------------------------------------
@@ -189,18 +174,13 @@ async def check(interaction: discord.Interaction):
 
 
 # -------------------------------------
-# 안전한 실행 엔트리포인트 (모든 환경 호환)
+# 안전한 실행
 # -------------------------------------
 def main_cli():
-    """CLI 및 IDE / Jupyter 모두에서 안전하게 실행"""
     try:
-        # 이미 루프가 돌아가는 환경 (VSCode, Jupyter 등)
-        loop = asyncio.get_running_loop()
-        loop.create_task(bot.start(TOKEN))
-        loop.run_forever()
-    except RuntimeError:
-        # 터미널 / Ubuntu 등 일반 환경
         bot.run(TOKEN)
+    except KeyboardInterrupt:
+        print("🛑 수동 종료됨")
 
 
 if __name__ == "__main__":
