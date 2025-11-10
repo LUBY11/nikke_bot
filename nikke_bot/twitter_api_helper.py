@@ -4,15 +4,19 @@ from config import BEARER_TOKEN, USERNAME, API_BASE
 
 HEADERS = {
     "Authorization": f"Bearer {BEARER_TOKEN}",
-    "User-Agent": "NikkeDiscordBot/1.2"
+    "User-Agent": "NikkeDiscordBot/1.5"
 }
 
 _last_seen = None
+
 
 class RateLimitError(Exception):
     pass
 
 
+# -------------------------------------
+# 사용자 ID 조회
+# -------------------------------------
 async def get_user_id(session, username):
     url = f"{API_BASE}/users/by/username/{username}"
     async with session.get(url, headers=HEADERS) as resp:
@@ -25,6 +29,9 @@ async def get_user_id(session, username):
         return data.get("data", {}).get("id")
 
 
+# -------------------------------------
+# 최근 트윗 가져오기
+# -------------------------------------
 async def fetch_tweets(session, user_id):
     url = f"{API_BASE}/users/{user_id}/tweets"
     params = {
@@ -43,6 +50,9 @@ async def fetch_tweets(session, user_id):
         return await resp.json()
 
 
+# -------------------------------------
+# 최신 트윗 반환
+# -------------------------------------
 async def get_latest_tweet(username=USERNAME):
     async with aiohttp.ClientSession() as session:
         user_id = await get_user_id(session, username)
@@ -61,11 +71,10 @@ async def get_latest_tweet(username=USERNAME):
         text = tweet["text"]
         created_at = tweet.get("created_at")
 
-        # ✅ 트윗에 실제 연결된 media만 추출
+        # ✅ 트윗에 연결된 미디어만 추출
         media_urls = []
-        media_keys = tweet.get("attachments", {}).get("media_keys", [])
         includes_media = data.get("includes", {}).get("media", [])
-
+        media_keys = tweet.get("attachments", {}).get("media_keys", [])
         for media in includes_media:
             if media.get("media_key") in media_keys:
                 url = media.get("url") or media.get("preview_image_url")
@@ -81,6 +90,9 @@ async def get_latest_tweet(username=USERNAME):
         }
 
 
+# -------------------------------------
+# 새 트윗 여부 확인
+# -------------------------------------
 async def has_new_tweet(username=USERNAME):
     global _last_seen
     tweet = await get_latest_tweet(username)
@@ -89,6 +101,8 @@ async def has_new_tweet(username=USERNAME):
 
     if _last_seen != tweet["id"]:
         _last_seen = tweet["id"]
-        print(f"🆕 새 트윗 발견! ID={_last_seen}")
+        print(f"[{datetime.now():%H:%M:%S}] 🆕 새 트윗 발견! ID={_last_seen}")
         return True, tweet
+
+    print(f"[{datetime.now():%H:%M:%S}] 🔁 새 트윗 없음.")
     return False, None
