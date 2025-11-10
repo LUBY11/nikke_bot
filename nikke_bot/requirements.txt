@@ -1,0 +1,5 @@
+discord.py
+aiohttp
+nest_asyncio
+python-dotenv
+requests
