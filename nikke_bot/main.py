@@ -130,7 +130,7 @@ async def send_tweet(tweet):
     highlighted = any(k in text for k in IMPORTANT_KEYWORDS)
 
     if highlighted:
-        await channel.send("@everyone 🚨 **중요 트윗 감지됨!** 🚨")
+        await channel.send("🚨 **중요 트윗 업데이트!** 🚨")
 
     embed = discord.Embed(
         title=f"🕊️ @{USERNAME} 새 트윗{' ‼️' if highlighted else ''}",
